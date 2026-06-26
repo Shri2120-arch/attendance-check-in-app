@@ -6,6 +6,7 @@ import { OnboardingForm } from "@/components/onboarding-form"
 import { QrScanner } from "@/components/qr-scanner"
 import { SuccessScreen } from "@/components/success-screen"
 import { captureLocation } from "@/lib/geo"
+import { DuplicateCheckInError, recordAttendance } from "@/lib/attendance-store"
 import { STUDENT_STORAGE_KEY, type AttendanceRecord, type Student } from "@/lib/types"
 
 type Step = "loading" | "onboarding" | "ready" | "scanning" | "submitting" | "success" | "error"
@@ -65,41 +66,18 @@ export function AttendancePortal() {
         console.log("[v0] location capture failed:", err instanceof Error ? err.message : err)
       }
 
-      // 2. Submit attendance to the server.
+      // 2. Save the attendance record locally (fully client-side, no backend).
       try {
         setStatusText("Recording attendance…")
-        const res = await fetch("/api/attendance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            studentName: student.fullName,
-            rollNumber: student.rollNumber,
-            department: student.department,
-            qrData,
-            latitude: location?.latitude ?? null,
-            longitude: location?.longitude ?? null,
-            accuracy: location?.accuracy ?? null,
-          }),
-        })
-
-        const data = await res.json()
-
-        if (res.status === 409) {
-          setErrorMessage(data?.message ?? "You have already checked in for this session.")
-          setStep("error")
-          return
-        }
-
-        if (!res.ok) {
-          setErrorMessage(data?.error ?? "Something went wrong. Please try again.")
-          setStep("error")
-          return
-        }
-
-        setRecord(data.record as AttendanceRecord)
+        const saved = recordAttendance(student, qrData, location)
+        setRecord(saved)
         setStep("success")
-      } catch {
-        setErrorMessage("Network error. Check your connection and try again.")
+      } catch (err) {
+        if (err instanceof DuplicateCheckInError) {
+          setErrorMessage(err.message)
+        } else {
+          setErrorMessage(err instanceof Error ? err.message : "Something went wrong. Please try again.")
+        }
         setStep("error")
       }
     },
